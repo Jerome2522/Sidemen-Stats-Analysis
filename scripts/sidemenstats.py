@@ -3,6 +3,7 @@ import json
 from tqdm import tqdm
 from datetime import datetime
 import logging
+from pymongo import MongoClient
 
 logging.basicConfig(level=logging.INFO)
 
@@ -151,17 +152,45 @@ class Sidemenstats:
             logging.error(f"Error transforming data for {video_id}: {e}")
             return None
 
-    def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl"):
+    def insert_to_mongodb(self, data_list, mongo_uri="mongodb://localhost:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
+        """
+        Insert data into MongoDB. Accepts a list of dicts or a single dict.
+        """
+        from pymongo import MongoClient
+        client = MongoClient(mongo_uri)
+        db = client[db_name]
+        collection = db[collection_name]
+        inserted_count = 0
+        try:
+            if isinstance(data_list, dict):
+                collection.insert_one(data_list)
+                inserted_count = 1
+            elif isinstance(data_list, list):
+                if data_list:
+                    collection.insert_many(data_list)
+                    inserted_count = len(data_list)
+            logging.info(f"✅ Inserted {inserted_count} records into {db_name}.{collection_name}")
+        except Exception as e:
+            logging.error(f"Error inserting to MongoDB: {e}")
+        finally:
+            client.close()
+
+    def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl", to_mongo=False, mongo_uri="mongodb://localhost:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Saves all transformed video data into a newline-delimited JSON file.
+        Optionally inserts the same data into MongoDB if to_mongo=True.
         """
         pull_date = datetime.today().strftime('%Y-%m-%d')
         count = 0
+        all_flat = []
         with open(filename, "a", encoding="utf-8") as f:
             for video_id, raw_data in video_data_dict.items():
                 flat = self.transform_video_data(video_id, raw_data, pull_date)
                 if flat:
                     json.dump(flat, f, ensure_ascii=False)
                     f.write("\n")
+                    all_flat.append(flat)
                     count += 1
         logging.info(f"✅ {count} videos written to {filename}")
+        if to_mongo and all_flat:
+            self.insert_to_mongodb(all_flat, mongo_uri=mongo_uri, db_name=db_name, collection_name=collection_name)
