@@ -1,39 +1,62 @@
 import requests
 import json
 from tqdm import tqdm
+from datetime import datetime
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 class Sidemenstats:
-
-    def __init__(self, api_key, channel_id): #this function is used to initialize the class
+    """
+    Class to fetch and process YouTube channel and video statistics for Sidemen.
+    """
+    def __init__(self, api_key, channel_id):
+        """
+        Initialize with YouTube API key and channel ID.
+        """
         self.api_key = api_key
         self.channel_id = channel_id
         self.channels_stats = None
         self.video_data = None
 
-    def get_sidemen_stats(self): #this function is used to get the channel stats
+    def get_sidemen_stats(self):
+        """
+        Fetch channel statistics from YouTube API.
+        """
         url = f"https://www.googleapis.com/youtube/v3/channels?part=statistics&id={self.channel_id}&key={self.api_key}"
-        json_url = requests.get(url)
-        data = json.loads(json_url.text)
         try:
-            data = data["items"][0]["statistics"]
-        except:
-            data = None
-        self.channels_stats = data
-        return data
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            stats = data["items"][0]["statistics"]
+        except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
+            logging.error(f"Error fetching channel stats: {e}")
+            stats = None
+        self.channels_stats = stats
+        return stats
 
-    def get_uploads_playlist_id(self): #this function is used to get the uploads playlist id of the channel
+    def get_uploads_playlist_id(self):
+        """
+        Fetch the uploads playlist ID for the channel.
+        """
         url = f"https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id={self.channel_id}&key={self.api_key}"
-        response = requests.get(url)
-        data = response.json()
         try:
-            return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
-        except:
-            return None
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            playlist_id = data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
+            logging.error(f"Error fetching uploads playlist ID: {e}")
+            playlist_id = None
+        return playlist_id
 
-    def get_channel_videos(self): #this function is used to get the videos from the channel (ALL THE DATES, TIMES, VIDEOID ETC)
+    def get_channel_videos(self):
+        """
+        Fetch all video IDs from the channel's uploads playlist.
+        """
         uploads_playlist_id = self.get_uploads_playlist_id()
         if not uploads_playlist_id:
-            print("Could not fetch uploads playlist ID.")
+            logging.error("Could not fetch uploads playlist ID.")
             return {}
 
         videos = {}
@@ -44,54 +67,101 @@ class Sidemenstats:
             url = base_url
             if next_page_token:
                 url += f"&pageToken={next_page_token}"
-
-            response = requests.get(url)
-            data = response.json()
-
-            for item in data.get("items", []):
-                video_id = item["contentDetails"]["videoId"]
-                videos[video_id] = {}
-
-            next_page_token = data.get("nextPageToken")
-            if not next_page_token:
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
+                data = response.json()
+                for item in data.get("items", []):
+                    video_id = item["contentDetails"]["videoId"]
+                    videos[video_id] = {}
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token:
+                    break
+            except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
+                logging.error(f"Error fetching channel videos: {e}")
                 break
-
         return videos
 
-    def get_video_data(self): #this function is used to get the video data from the channel
+    def get_video_data(self):
+        """
+        Fetch detailed data for all videos in the channel.
+        This version fetches all parts in a single API call per video (more efficient).
+        """
         channel_videos = self.get_channel_videos()
-        parts=["snippet","statistics","contentDetails"]
-        for video_id in tqdm(channel_videos):
-            for part in parts:
-                data=self._get_single_video_data(video_id,part)
-                channel_videos[video_id].update(data)
-
+        if not channel_videos:
+            return {}
+        video_ids = list(channel_videos.keys())
+        batch_size = 50  # YouTube API max per call
+        parts = ["snippet", "statistics", "contentDetails"]
+        for i in tqdm(range(0, len(video_ids), batch_size), desc="Fetching video data"):
+            batch_ids = video_ids[i:i+batch_size]
+            ids_str = ",".join(batch_ids)
+            url = f"https://www.googleapis.com/youtube/v3/videos?part={','.join(parts)}&id={ids_str}&key={self.api_key}"
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
+                data = response.json()
+                for item in data.get("items", []):
+                    vid = item.get("id")
+                    if vid in channel_videos:
+                        channel_videos[vid].update({
+                            "snippet": item.get("snippet", {}),
+                            "statistics": item.get("statistics", {}),
+                            "contentDetails": item.get("contentDetails", {})
+                        })
+            except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
+                logging.error(f"Error fetching video data batch: {e}")
+                continue
         self.video_data = channel_videos
         return channel_videos
 
-
-    def _get_single_video_data(self,video_id,part):#this function is used to get the data for a single video (using the video id and the part)
-        url=f"https://www.googleapis.com/youtube/v3/videos?part={part}&id={video_id}&key={self.api_key}"
-        response=requests.get(url)
-        data=json.loads(response.text)
+    def transform_video_data(self, video_id, video_data, pull_date=None):
+        """
+        Transform a single video's data into a flat dictionary, including channel stats.
+        """
+        if pull_date is None:
+            pull_date = datetime.today().strftime('%Y-%m-%d')
+        def safe_int(val):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return 0
+        # Ensure channel stats are available
+        if not self.channels_stats:
+            self.get_sidemen_stats()
+        channel_stats = self.channels_stats or {}
         try:
-            data=data["items"][0][part]
-        except:
-            print(f"Error getting {part} for video {video_id}")
-            data=None
-        return data
+            snippet = video_data.get("snippet", {})
+            stats = video_data.get("statistics", {})
+            content = video_data.get("contentDetails", {})
+            return {
+                "video_id": video_id,
+                "title": snippet.get("title", "Unknown Title"),
+                "published_at": snippet.get("publishedAt", ""),
+                "views": safe_int(stats.get("viewCount")),
+                "likes": safe_int(stats.get("likeCount")),
+                "comments": safe_int(stats.get("commentCount")),
+                "duration": content.get("duration", ""),
+                "pull_date": pull_date,
+                "channel_viewCount": safe_int(channel_stats.get("viewCount")),
+                "channel_subscriberCount": safe_int(channel_stats.get("subscriberCount")),
+                "channel_videoCount": safe_int(channel_stats.get("videoCount"))
+            }
+        except Exception as e:
+            logging.error(f"Error transforming data for {video_id}: {e}")
+            return None
 
-    def dump(self): #this function is used to dump the channel stats to a json file
-        if self.channels_stats is None or self.video_data is None:
-            print("No data to dump")
-            return
-
-        fused_data={self.channel_id:{"Channel_stats":self.channels_stats,"Video_data":self.video_data}}
-        
-        channel_title = self.video_data.popitem()[1].get('channelTitle',  self.channel_id)
-        channel_title = channel_title.replace(" ", "_").lower()
-        file_name = channel_title + ".json"
-        with open(file_name, "w") as f:
-            json.dump(fused_data, f, indent=4)
-
-        print("File dumped successfully")
+    def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl"):
+        """
+        Saves all transformed video data into a newline-delimited JSON file.
+        """
+        pull_date = datetime.today().strftime('%Y-%m-%d')
+        count = 0
+        with open(filename, "a", encoding="utf-8") as f:
+            for video_id, raw_data in video_data_dict.items():
+                flat = self.transform_video_data(video_id, raw_data, pull_date)
+                if flat:
+                    json.dump(flat, f, ensure_ascii=False)
+                    f.write("\n")
+                    count += 1
+        logging.info(f"✅ {count} videos written to {filename}")

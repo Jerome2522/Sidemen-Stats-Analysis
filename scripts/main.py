@@ -6,5 +6,5 @@ channel_id="UCDogdKl7t7NHzQ95aEwkdMw"
 
 sidemen=Sidemenstats(API_KEY, channel_id)
 sidemen.get_sidemen_stats()
-sidemen.get_video_data()
-sidemen.dump()
+video_data = sidemen.get_video_data()
+sidemen.dump_flat_data(video_data)
