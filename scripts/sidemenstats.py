@@ -51,9 +51,35 @@ class Sidemenstats:
             playlist_id = None
         return playlist_id
 
-    def get_channel_videos(self):
+    def get_latest_video_id_from_db(self, mongo_uri="mongodb://localhost:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
         """
-        Fetch all video IDs from the channel's uploads playlist.
+        Get the most recent video ID from the database to determine where to start fetching new videos.
+        """
+        from pymongo import MongoClient
+        try:
+            client = MongoClient(mongo_uri)
+            db = client[db_name]
+            collection = db[collection_name]
+            
+            # Find the most recent video by published_at date
+            latest_video = collection.find_one(
+                sort=[("published_at", -1)]
+            )
+            
+            if latest_video:
+                return latest_video.get("video_id")
+            else:
+                return None
+        except Exception as e:
+            logging.error(f"Error getting latest video ID: {e}")
+            return None
+        finally:
+            client.close()
+
+    def get_channel_videos(self, max_results=None):
+        """
+        Fetch video IDs from the channel's uploads playlist.
+        If max_results is specified, only fetch that many videos.
         """
         uploads_playlist_id = self.get_uploads_playlist_id()
         if not uploads_playlist_id:
@@ -63,6 +89,7 @@ class Sidemenstats:
         videos = {}
         base_url = f"https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId={uploads_playlist_id}&maxResults=50&key={self.api_key}"
         next_page_token = ""
+        videos_fetched = 0
 
         while True:
             url = base_url
@@ -75,6 +102,15 @@ class Sidemenstats:
                 for item in data.get("items", []):
                     video_id = item["contentDetails"]["videoId"]
                     videos[video_id] = {}
+                    videos_fetched += 1
+                    
+                    # Stop if we've reached the max_results limit
+                    if max_results and videos_fetched >= max_results:
+                        break
+                
+                if max_results and videos_fetched >= max_results:
+                    break
+                    
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token:
                     break
@@ -82,6 +118,83 @@ class Sidemenstats:
                 logging.error(f"Error fetching channel videos: {e}")
                 break
         return videos
+
+    def get_incremental_video_data(self, max_new_videos=10):
+        """
+        Fetch all videos but only return the newest ones that haven't been processed yet.
+        """
+        # Get the latest video ID from database
+        latest_video_id = self.get_latest_video_id_from_db()
+        
+        if latest_video_id:
+            logging.info(f"Latest processed video ID: {latest_video_id}")
+            logging.info(f"Fetching all videos but will only append the newest ones...")
+        else:
+            logging.info("No existing data found. Fetching all videos for first run...")
+        
+        # Fetch ALL videos (newest first)
+        channel_videos = self.get_channel_videos()
+        
+        if not channel_videos:
+            return {}
+            
+        video_ids = list(channel_videos.keys())
+        batch_size = 50  # YouTube API max per call
+        parts = ["snippet", "statistics", "contentDetails"]
+        
+        for i in tqdm(range(0, len(video_ids), batch_size), desc="Fetching all video data"):
+            batch_ids = video_ids[i:i+batch_size]
+            ids_str = ",".join(batch_ids)
+            url = f"https://www.googleapis.com/youtube/v3/videos?part={','.join(parts)}&id={ids_str}&key={self.api_key}"
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
+                data = response.json()
+                for item in data.get("items", []):
+                    vid = item.get("id")
+                    if vid in channel_videos:
+                        channel_videos[vid].update({
+                            "snippet": item.get("snippet", {}),
+                            "statistics": item.get("statistics", {}),
+                            "contentDetails": item.get("contentDetails", {})
+                        })
+            except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
+                logging.error(f"Error fetching video data batch: {e}")
+                continue
+                
+        self.video_data = channel_videos
+        return channel_videos
+
+    def filter_new_videos_only(self, video_data_dict, mongo_uri="mongodb://localhost:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
+        """
+        Filter out videos that already exist in the database, keeping only new ones.
+        """
+        from pymongo import MongoClient
+        try:
+            client = MongoClient(mongo_uri)
+            db = client[db_name]
+            collection = db[collection_name]
+            
+            # Get all existing video IDs from database
+            existing_video_ids = set()
+            cursor = collection.find({}, {"video_id": 1})
+            for doc in cursor:
+                existing_video_ids.add(doc.get("video_id"))
+            
+            # Filter out videos that already exist
+            new_videos = {}
+            for video_id, video_data in video_data_dict.items():
+                if video_id not in existing_video_ids:
+                    new_videos[video_id] = video_data
+            
+            logging.info(f"Found {len(video_data_dict)} total videos, {len(new_videos)} are new")
+            return new_videos
+            
+        except Exception as e:
+            logging.error(f"Error filtering videos: {e}")
+            return video_data_dict  # Return all videos if there's an error
+        finally:
+            client.close()
 
     def get_video_data(self):
         """
@@ -155,6 +268,7 @@ class Sidemenstats:
     def insert_to_mongodb(self, data_list, mongo_uri="mongodb://localhost:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Insert data into MongoDB. Accepts a list of dicts or a single dict.
+        Appends new data without deleting existing data for incremental updates.
         """
         from pymongo import MongoClient
         client = MongoClient(mongo_uri)
@@ -169,7 +283,7 @@ class Sidemenstats:
                 if data_list:
                     collection.insert_many(data_list)
                     inserted_count = len(data_list)
-            logging.info(f"✅ Inserted {inserted_count} records into {db_name}.{collection_name}")
+            logging.info(f"✅ Inserted {inserted_count} new records into {db_name}.{collection_name}")
         except Exception as e:
             logging.error(f"Error inserting to MongoDB: {e}")
         finally:
@@ -179,10 +293,12 @@ class Sidemenstats:
         """
         Saves all transformed video data into a newline-delimited JSON file.
         Optionally inserts the same data into MongoDB if to_mongo=True.
+        Appends to the file for incremental updates.
         """
         pull_date = datetime.today().strftime('%Y-%m-%d')
         count = 0
         all_flat = []
+        # Use 'a' mode to append to the file for incremental updates
         with open(filename, "a", encoding="utf-8") as f:
             for video_id, raw_data in video_data_dict.items():
                 flat = self.transform_video_data(video_id, raw_data, pull_date)
@@ -191,6 +307,6 @@ class Sidemenstats:
                     f.write("\n")
                     all_flat.append(flat)
                     count += 1
-        logging.info(f"✅ {count} videos written to {filename}")
+        logging.info(f"✅ {count} new videos appended to {filename}")
         if to_mongo and all_flat:
             self.insert_to_mongodb(all_flat, mongo_uri=mongo_uri, db_name=db_name, collection_name=collection_name)
