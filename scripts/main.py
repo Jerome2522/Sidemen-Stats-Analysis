@@ -5,7 +5,7 @@ API_KEY = "AIzaSyC4IXe1lAD7nXdoK8cGEeTEewZLIEsW7iQ"
 channel_id = "UCDogdKl7t7NHzQ95aEwkdMw"
 jsonl_filename = "sidemen_flat_data.jsonl"
 # Use environment variable for MongoDB URI, with Docker container name as default
-mongo_uri = os.getenv('MONGO_URI', 'mongodb://sidemenproject-mongo-1:27017/')
+mongo_uri = os.getenv('MONGO_URI', 'mongodb://192.168.1.8:27017/')
 db_name = "Sidemen"
 collection_name = "sidemen_stats"
 
