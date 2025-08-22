@@ -34,6 +34,7 @@ services:
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: admin
+      MONGO_URI: mongodb+srv://jerome:123jerome@sidemen.vzfmegj.mongodb.net/?retryWrites=true&w=majority&appName=Sidemen
     depends_on:
       - postgres
       - mongo
@@ -58,6 +59,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
       _PIP_ADDITIONAL_REQUIREMENTS: "requests tqdm pymongo"
       _AIRFLOW_DB_UPGRADE: 'true'
+      MONGO_URI: mongodb+srv://jerome:123jerome@sidemen.vzfmegj.mongodb.net/?retryWrites=true&w=majority&appName=Sidemen
     depends_on:
       - postgres
       - mongo

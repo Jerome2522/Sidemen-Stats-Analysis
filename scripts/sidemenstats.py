@@ -5,6 +5,9 @@ from datetime import datetime
 import logging
 from pymongo import MongoClient
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
 
 logging.basicConfig(level=logging.INFO)
 
@@ -52,11 +55,13 @@ class Sidemenstats:
             playlist_id = None
         return playlist_id
 
-    def get_latest_video_id_from_db(self, mongo_uri="mongodb://192.168.1.8:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
+    def get_latest_video_id_from_db(self, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Get the most recent video ID from the database to determine where to start fetching new videos.
         """
         from pymongo import MongoClient
+        if mongo_uri is None:
+            mongo_uri = os.getenv("MONGO_URI")
         try:
             client = MongoClient(mongo_uri)
             db = client[db_name]
@@ -166,11 +171,13 @@ class Sidemenstats:
         self.video_data = channel_videos
         return channel_videos
 
-    def filter_new_videos_only(self, video_data_dict, mongo_uri="mongodb://192.168.1.8:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
+    def filter_new_videos_only(self, video_data_dict, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Filter out videos that already exist in the database, keeping only new ones.
         """
         from pymongo import MongoClient
+        if mongo_uri is None:
+            mongo_uri = os.getenv("MONGO_URI")
         client = MongoClient(mongo_uri)
         db = client[db_name]
         collection = db[collection_name]
@@ -265,12 +272,14 @@ class Sidemenstats:
             logging.error(f"Error transforming data for {video_id}: {e}")
             return None
 
-    def insert_to_mongodb(self, data_list, mongo_uri=None, db_name="mongodb://192.168.1.8:27017/", collection_name="sidemen_stats"):
+    def insert_to_mongodb(self, data_list, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Insert data into MongoDB. Accepts a list of dicts or a single dict.
         Appends new data without deleting existing data for incremental updates.
         """
         from pymongo import MongoClient
+        if mongo_uri is None:
+            mongo_uri = os.getenv("MONGO_URI")
         client = MongoClient(mongo_uri)
         db = client[db_name]
         collection = db[collection_name]
@@ -289,7 +298,7 @@ class Sidemenstats:
         finally:
             client.close()
 
-    def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl", to_mongo=False, mongo_uri="mongodb://192.168.1.8:27017/", db_name="Sidemen", collection_name="sidemen_stats"):
+    def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl", to_mongo=False, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
         """
         Saves all transformed video data into a newline-delimited JSON file.
         Optionally inserts the same data into MongoDB if to_mongo=True.
@@ -308,5 +317,7 @@ class Sidemenstats:
                     all_flat.append(flat)
                     count += 1
         logging.info(f"✅ {count} new videos appended to {filename}")
+        if mongo_uri is None:
+            mongo_uri = os.getenv("MONGO_URI")
         if to_mongo and all_flat:
             self.insert_to_mongodb(all_flat, mongo_uri=mongo_uri, db_name=db_name, collection_name=collection_name)
