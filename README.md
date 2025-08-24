@@ -1,6 +1,6 @@
 # 📊 Sidemen YouTube Channel Analytics  
 
-This project is a **data pipeline + analytics dashboard** that automatically collects, stores, and visualizes video statistics from the [Sidemen YouTube channel](https://www.youtube.com/user/Sidemen).  
+This project is a **data pipeline + analytics dashboard** that automatically collects, stores, and visualizes video statistics from the [Sidemen YouTube channel](https://youtube.com/@sidemen?si=iYEr-LMoyxF1D_EB).  
 
 - ⏰ Runs **every Sunday** using Apache Airflow (in Docker)  
 - 🎥 Fetches only **newest video data** via YouTube Data API v3  
