@@ -1,3 +1,9 @@
 requests
 tqdm
 pymongo
+streamlit
+pandas
+python-dotenv
+altair
+isodate
+
