@@ -11,7 +11,7 @@ def main():
     and save them to a JSONL file and a MongoDB database.
     """
     # --- Configuration ---
-    API_KEY=os.getenv("API")
+    API_KEY=os.getenv("YOUTUBE_API_KEY")
     if not API_KEY:
         print("Error: YOUTUBE_API_KEY environment variable not set.", file=sys.stderr)
         sys.exit(1)

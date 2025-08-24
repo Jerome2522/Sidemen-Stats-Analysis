@@ -1,7 +1,10 @@
 import requests
 import json
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
+import os
 
-api_key = "AIzaSyC4IXe1lAD7nXdoK8cGEeTEewZLIEsW7iQ"
+api_key = os.getenv("API")
 query = "Sidemen"
 
 url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q={query}&key={api_key}"

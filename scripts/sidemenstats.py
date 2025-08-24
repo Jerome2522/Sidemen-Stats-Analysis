@@ -11,23 +11,17 @@ load_dotenv()  # Load environment variables from .env file
 
 logging.basicConfig(level=logging.INFO)
 
+#Class to fetch and process YouTube channel and video statistics for Sidemen.
 class Sidemenstats:
-    """
-    Class to fetch and process YouTube channel and video statistics for Sidemen.
-    """
     def __init__(self, api_key, channel_id):
-        """
-        Initialize with YouTube API key and channel ID.
-        """
+
         self.api_key = api_key
         self.channel_id = channel_id
         self.channels_stats = None
         self.video_data = None
 
+    # Fetch channel statistics
     def get_sidemen_stats(self):
-        """
-        Fetch channel statistics from YouTube API.
-        """
         url = f"https://www.googleapis.com/youtube/v3/channels?part=statistics&id={self.channel_id}&key={self.api_key}"
         try:
             response = requests.get(url)
@@ -40,10 +34,8 @@ class Sidemenstats:
         self.channels_stats = stats
         return stats
 
+    # Fetch uploads playlist ID
     def get_uploads_playlist_id(self):
-        """
-        Fetch the uploads playlist ID for the channel.
-        """
         url = f"https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id={self.channel_id}&key={self.api_key}"
         try:
             response = requests.get(url)
@@ -55,10 +47,8 @@ class Sidemenstats:
             playlist_id = None
         return playlist_id
 
+    # Fetch latest video ID from database
     def get_latest_video_id_from_db(self, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
-        """
-        Get the most recent video ID from the database to determine where to start fetching new videos.
-        """
         from pymongo import MongoClient
         if mongo_uri is None:
             mongo_uri = os.getenv("MONGO_URI")
@@ -82,11 +72,8 @@ class Sidemenstats:
         finally:
             client.close()
 
+    # Fetch all videos in the channel's uploads playlist
     def get_channel_videos(self, max_results=None):
-        """
-        Fetch video IDs from the channel's uploads playlist.
-        If max_results is specified, only fetch that many videos.
-        """
         uploads_playlist_id = self.get_uploads_playlist_id()
         if not uploads_playlist_id:
             logging.error("Could not fetch uploads playlist ID.")
@@ -125,10 +112,8 @@ class Sidemenstats:
                 break
         return videos
 
+    # Fetch all video data for the channel
     def get_incremental_video_data(self, max_new_videos=10):
-        """
-        Fetch all videos but only return the newest ones that haven't been processed yet.
-        """
         # Get the latest video ID from database
         latest_video_id = self.get_latest_video_id_from_db()
         
@@ -171,10 +156,8 @@ class Sidemenstats:
         self.video_data = channel_videos
         return channel_videos
 
+    # Filter out videos that already exist in the database
     def filter_new_videos_only(self, video_data_dict, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
-        """
-        Filter out videos that already exist in the database, keeping only new ones.
-        """
         from pymongo import MongoClient
         if mongo_uri is None:
             mongo_uri = os.getenv("MONGO_URI")
@@ -203,11 +186,8 @@ class Sidemenstats:
         finally:
             client.close()
 
+    # Fetch all video data for the channel
     def get_video_data(self):
-        """
-        Fetch detailed data for all videos in the channel.
-        This version fetches all parts in a single API call per video (more efficient).
-        """
         channel_videos = self.get_channel_videos()
         if not channel_videos:
             return {}
@@ -236,10 +216,8 @@ class Sidemenstats:
         self.video_data = channel_videos
         return channel_videos
 
+    # Transform raw video data into flat structure
     def transform_video_data(self, video_id, video_data, pull_date=None):
-        """
-        Transform a single video's data into a flat dictionary, including channel stats.
-        """
         if pull_date is None:
             pull_date = datetime.today().strftime('%Y-%m-%d')
         def safe_int(val):
@@ -272,11 +250,8 @@ class Sidemenstats:
             logging.error(f"Error transforming data for {video_id}: {e}")
             return None
 
+    # Insert data into MongoDB
     def insert_to_mongodb(self, data_list, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
-        """
-        Insert data into MongoDB. Accepts a list of dicts or a single dict.
-        Appends new data without deleting existing data for incremental updates.
-        """
         from pymongo import MongoClient
         if mongo_uri is None:
             mongo_uri = os.getenv("MONGO_URI")
@@ -298,12 +273,8 @@ class Sidemenstats:
         finally:
             client.close()
 
+    # Dump flat data to JSONL file and optionally to MongoDB
     def dump_flat_data(self, video_data_dict, filename="sidemen_flat_data.jsonl", to_mongo=False, mongo_uri=None, db_name="Sidemen", collection_name="sidemen_stats"):
-        """
-        Saves all transformed video data into a newline-delimited JSON file.
-        Optionally inserts the same data into MongoDB if to_mongo=True.
-        Appends to the file for incremental updates.
-        """
         pull_date = datetime.today().strftime('%Y-%m-%d')
         count = 0
         all_flat = []
